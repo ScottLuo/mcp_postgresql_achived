@@ -30,7 +30,7 @@
 ```yaml
 language: go
 kind: compiled
-entrypoint: ./bin/mcp-tool-binary  # 相对路径，指向编译后的二进制文件
+entrypoint: ./mcp-tool-binary  # 相对路径，指向编译后的二进制文件
 # install: "" # 对于 compiled 类型通常不需要 install 脚本，但如果需要预构建可保留为空或注释
 # interpreter: none # Go 是编译型语言
 args: [] # 可选，如果有默认参数
