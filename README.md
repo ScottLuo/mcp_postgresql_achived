@@ -203,9 +203,12 @@ Changing operation parameters after approval invalidates the approval.
 
 ```bash
 make build          # Build for linux/amd64 (CGO_ENABLED=1, required by pg_query_go)
+make build VERSION=0.2.0   # Build with a custom version (injected via ldflags)
 # Or manually:
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.appVersion=0.1.0" -o build/postgres-dba-mcp ./cmd/server/
 ```
+
+The version is injected at build time via Go's `-ldflags` mechanism. The default version is `0.1.0` (set in `cmd/server/main.go`).
 
 ### Run
 
@@ -238,16 +241,20 @@ docker run -i --env-file .env postgres-dba-mcp
 
 ## CI/CD Packaging
 
-On push to `main`, the CI pipeline:
+The release pipeline (`.github/workflows/release.yml`) triggers on push to `main`:
 
-1. Cross-compiles for `linux/amd64`:
+1. Runs unit tests (`go test -tags=unit ./...`)
+2. Auto-increments the version: reads the last git tag matching `v*`, increments the
+   patch number by 1. If no tag exists, defaults to `v0.1.0`.
+3. Builds the binary with version injected via ldflags:
    ```bash
-   CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+   CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.appVersion=${VERSION}" -o build/postgres-dba-mcp ./cmd/server/
    ```
-2. Creates a `tar.gz` containing:
+4. Creates a `tar.gz` containing:
    - `postgres-dba-mcp` (executable binary, `chmod +x`)
    - `tool.yaml` (runtime contract)
-3. Publishes as a GitHub Release artifact.
+5. Creates a git tag `v${VERSION}` and pushes it to the remote.
+6. Publishes as a GitHub Release with the tar.gz as an asset.
 
 ## DBA Diagnosis Workflow Example
 

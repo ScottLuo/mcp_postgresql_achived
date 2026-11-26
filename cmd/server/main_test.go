@@ -197,3 +197,31 @@ func clearAllEnv(t *testing.T) {
 		t.Setenv(k, "")
 	}
 }
+
+// TestAppVersion_Default verifies that the default version string is "0.1.0".
+// This is the value set in main.go that gets overridden by -ldflags at build time.
+func TestAppVersion_Default(t *testing.T) {
+	if appVersion != "0.1.0" {
+		t.Errorf("default appVersion = %q, want %q", appVersion, "0.1.0")
+	}
+}
+
+// TestAppVersion_Overridable verifies that appVersion is a var (not const),
+// so it can be overridden at build time via -ldflags "-X main.appVersion=...".
+// The test simulates this by assigning a new value directly.
+func TestAppVersion_Overridable(t *testing.T) {
+	orig := appVersion
+	defer func() { appVersion = orig }()
+
+	appVersion = "0.2.0"
+	if appVersion != "0.2.0" {
+		t.Errorf("appVersion = %q, want %q (verifying var overridability)", appVersion, "0.2.0")
+	}
+}
+
+// TestAppName verifies the application name constant.
+func TestAppName(t *testing.T) {
+	if appName != "postgres-dba-mcp" {
+		t.Errorf("appName = %q, want %q", appName, "postgres-dba-mcp")
+	}
+}

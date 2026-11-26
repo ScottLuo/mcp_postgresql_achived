@@ -921,3 +921,33 @@ connections. It only operates through explicitly registered and authorized MCP
 capabilities. This makes the system reusable by different AI Agents, independently
 deployable, and suitable for managing development, staging, and production PostgreSQL
 environments.
+
+---
+
+## §22 CI/CD & Release Process
+
+### Trigger
+The release pipeline (`.github/workflows/release.yml`) is triggered on **push to `main`**.
+
+### Versioning
+- Scheme: semantic versioning (`MAJOR.MINOR.PATCH`).
+- Starting version: `v0.1.0`.
+- Auto-increment: the pipeline reads the latest git tag matching `v*`, extracts the
+  patch component, increments it by 1, and uses the result as the new release version.
+  If no tag exists, it defaults to `v0.1.0`.
+
+### Build
+- Target: `linux/amd64` with `CGO_ENABLED=1` (required by `pg_query_go`).
+- Version injection: `-ldflags "-X main.appVersion=${VERSION}"` sets the binary's
+  version string at compile time.
+
+### Packaging
+- The release artifact is a `tar.gz` containing:
+  1. `postgres-dba-mcp` — the compiled binary (executable).
+  2. `tool.yaml` — the runtime contract file.
+
+### Publishing
+- A git tag `v${VERSION}` is created and pushed to the remote.
+- A GitHub Release is created with the tag, a release name, description, and the
+  tar.gz as a downloadable asset.
+- Required GitHub permission: `contents: write`.

@@ -35,10 +35,11 @@ import (
 	"postgres-dba-mcp/internal/tools/query"
 )
 
-const (
-	appName    = "postgres-dba-mcp"
-	appVersion = "1.0.0"
-)
+const appName = "postgres-dba-mcp"
+
+// appVersion is the default version string; overridden at build time via
+// -ldflags "-X main.appVersion=<version>".
+var appVersion = "0.1.0"
 
 func main() {
 	if err := run(context.Background()); err != nil {

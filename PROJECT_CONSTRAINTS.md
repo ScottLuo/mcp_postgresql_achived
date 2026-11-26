@@ -58,15 +58,27 @@ timeout_seconds: 30
 *注意：`entrypoint` 指向的必须是编译好的二进制文件路径。*
 
 ## 6. CI/CD Packaging Logic
+### Trigger
+The release pipeline (`.github/workflows/release.yml`) triggers on **push to `main`**.
+
+### Version Management
+- Starting version: `v0.1.0`
+- Auto-increment: patch number is incremented by 1 on each release (read last `v*` git tag, bump patch).
+- Version injection: the binary version is set at build time via `-ldflags "-X main.appVersion=..."`.
+
+### Build Command
 构建命令必须针对 `linux/amd64`：
 ```bash
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.appVersion=${VERSION}" -o build/postgres-dba-mcp ./cmd/server/
 ```
 （`CGO_ENABLED=1` is required by `pg_query_go`, the cgo-based SQL parser.）
+
+### Release Artifact
 生成的发布包（tar.gz）必须包含：
 1. 编译好的二进制文件 (`postgres-dba-mcp`)
 2. `tool.yaml` 文件
 - 确保二进制文件具有执行权限 (`chmod +x`)。
+- 发布为 GitHub Release，附带 git tag `v${VERSION}` 和 tar.gz 附件。
 
 # Execution Steps
 1. 初始化 Go 模块（`go mod init postgres-dba-mcp`）。
