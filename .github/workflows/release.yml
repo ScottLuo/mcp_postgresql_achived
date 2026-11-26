@@ -48,14 +48,21 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Next version: v${VERSION}"
 
-      - name: Build binary
+      - name: Build static binary via Docker (Alpine/musl)
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # Build a fully static linux/amd64 binary using the project's Dockerfile
+          # (Alpine base + -extldflags '-static'). This ensures the binary works
+          # on both glibc (Debian/Ubuntu) and musl (Alpine) systems.
+          docker build \
+            --build-arg VERSION=${VERSION} \
+            --target builder \
+            -t postgres-dba-mcp:build .
           mkdir -p build
-          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-            go build -ldflags "-X main.appVersion=${VERSION}" \
-            -o build/postgres-dba-mcp ./cmd/server/
+          docker create --name tmp-pdm postgres-dba-mcp:build
+          docker cp tmp-pdm:/app/postgres-dba-mcp build/postgres-dba-mcp
+          docker rm tmp-pdm
           chmod +x build/postgres-dba-mcp
 
       - name: Create release package
