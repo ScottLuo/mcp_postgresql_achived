@@ -1,0 +1,222 @@
+# PostgreSQL DBA MCP Gateway - Tool Metadata Catalog
+#
+# Declarative metadata for all 34 DBA tools across 5 categories.
+# Referenced by the registry for validation and documentation purposes.
+# The actual registration is via Go code in each tool package's Register()
+# function; this file serves as a machine-readable catalog for external
+# tool discovery and CI validation.
+#
+# permission_level values:
+#   READ_ONLY               - automatically executable within configured limits
+#   CONTROLLED_MAINTENANCE  - allowed when target policy and operation permit
+#   REQUIRES_APPROVAL       - requires explicit human approval before execution
+
+tools:
+  # ── Discovery (9) ──────────────────────────────────────────────────────
+  - name: db_get_info
+    description: "Database version, uptime, and server information"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_list_databases
+    description: "List databases visible to the configured role"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_list_schemas
+    description: "List schemas in the database"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_list_tables
+    description: "List tables in a given schema"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_describe_table
+    description: "Table columns, indexes, and constraints"
+    permission_level: READ_ONLY
+    timeout_seconds: 15
+    category: discovery
+
+  - name: db_list_indexes
+    description: "Index information for a table"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_list_constraints
+    description: "Primary key, foreign key, unique, and check constraints"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_get_table_size
+    description: "Table and index disk usage"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: discovery
+
+  - name: db_get_column_stats
+    description: "Available column statistics from the planner"
+    permission_level: READ_ONLY
+    timeout_seconds: 15
+    category: discovery
+
+  # ── Monitoring (11) ────────────────────────────────────────────────────
+  - name: db_get_activity
+    description: "Current database activity (active sessions, queries)"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_connections
+    description: "Connection statistics and breakdown"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_locks
+    description: "Current lock information and waiters"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_slow_queries
+    description: "Slow query statistics from pg_stat_statements"
+    permission_level: READ_ONLY
+    timeout_seconds: 15
+    category: monitoring
+
+  - name: db_get_database_stats
+    description: "Database-level statistics from pg_stat_database"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_table_stats
+    description: "Table access statistics from pg_stat_user_tables"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_index_stats
+    description: "Index usage statistics from pg_stat_user_indexes"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_cache_stats
+    description: "Cache hit statistics (buffer cache)"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_replication_status
+    description: "Replication status (primary/standby)"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_replication_lag
+    description: "Replication lag measurements"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  - name: db_get_deadlocks
+    description: "Deadlock statistics from pg_stat_database"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: monitoring
+
+  # ── Query Analysis (4) ─────────────────────────────────────────────────
+  - name: db_query_readonly
+    description: "Execute read-only SQL with parameterized queries and limits"
+    permission_level: READ_ONLY
+    timeout_seconds: 30
+    category: query
+
+  - name: db_explain_query
+    description: "Generate EXPLAIN plan without executing the query"
+    permission_level: READ_ONLY
+    timeout_seconds: 30
+    category: query
+
+  - name: db_explain_analyze
+    description: "Execute EXPLAIN ANALYZE under strict controls (actually runs the query)"
+    permission_level: REQUIRES_APPROVAL
+    timeout_seconds: 60
+    category: query
+
+  - name: db_estimate_query_cost
+    description: "Estimate query plan cost without execution"
+    permission_level: READ_ONLY
+    timeout_seconds: 30
+    category: query
+
+  # ── Maintenance (7) ────────────────────────────────────────────────────
+  - name: db_vacuum_table
+    description: "Run VACUUM on a table (non-transactional)"
+    permission_level: CONTROLLED_MAINTENANCE
+    timeout_seconds: 120
+    category: maintenance
+
+  - name: db_analyze_table
+    description: "Run ANALYZE on a table to update planner statistics"
+    permission_level: CONTROLLED_MAINTENANCE
+    timeout_seconds: 60
+    category: maintenance
+
+  - name: db_reindex_table
+    description: "Rebuild all indexes on a table"
+    permission_level: CONTROLLED_MAINTENANCE
+    timeout_seconds: 120
+    category: maintenance
+
+  - name: db_create_index
+    description: "Create an index on a table (supports CONCURRENTLY)"
+    permission_level: CONTROLLED_MAINTENANCE
+    timeout_seconds: 120
+    category: maintenance
+
+  - name: db_drop_index
+    description: "Drop an index from a table"
+    permission_level: REQUIRES_APPROVAL
+    timeout_seconds: 30
+    category: maintenance
+
+  - name: db_cancel_query
+    description: "Cancel a running query by process ID"
+    permission_level: CONTROLLED_MAINTENANCE
+    timeout_seconds: 10
+    category: maintenance
+
+  - name: db_terminate_connection
+    description: "Terminate a backend connection by process ID"
+    permission_level: REQUIRES_APPROVAL
+    timeout_seconds: 10
+    category: maintenance
+
+  # ── Configuration (3) ──────────────────────────────────────────────────
+  - name: db_get_config
+    description: "Read a single PostgreSQL configuration parameter"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: configuration
+
+  - name: db_get_config_list
+    description: "Read permitted configuration parameters"
+    permission_level: READ_ONLY
+    timeout_seconds: 10
+    category: configuration
+
+  - name: db_reload_config
+    description: "Reload PostgreSQL configuration (pg_reload_conf)"
+    permission_level: REQUIRES_APPROVAL
+    timeout_seconds: 10
+    category: configuration
