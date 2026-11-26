@@ -19,11 +19,15 @@ RUN go mod download
 # Copy source.
 COPY . .
 
+# Version injection via ldflags (set by CI/CD at release time).
+ARG VERSION=dev
+
 # Build static linux/amd64 binary.
 # CGO_ENABLED=1 is required by pg_query_go (cgo-based PostgreSQL SQL parser).
-# -ldflags "-linkmode external -extldflags '-static'" produces a static binary.
+# -ldflags "-linkmode external -extldflags '-static'" produces a static binary
+# that works on both glibc and musl (Alpine) systems.
 RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-    go build -ldflags "-linkmode external -extldflags '-static'" \
+    go build -ldflags "-linkmode external -extldflags '-static' -X main.appVersion=${VERSION}" \
     -o /app/postgres-dba-mcp ./cmd/server/
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────

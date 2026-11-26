@@ -1,0 +1,9 @@
+.git
+.github
+build/
+release/
+*.tar.gz
+Dockerfile
+.dockerignore
+README.md
+docs/
