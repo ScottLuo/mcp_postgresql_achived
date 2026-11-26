@@ -231,15 +231,18 @@ func (s *Service) createIndex(ctx context.Context, args json.RawMessage) (*mcp.T
 		return approvalErr, nil
 	}
 
-	// Build SQL: CREATE [CONCURRENTLY] [UNIQUE] INDEX "index_name" ON "schema"."table" ("col1", "col2", ...)
+	// Build SQL: CREATE [UNIQUE] INDEX [CONCURRENTLY] "index_name" ON "schema"."table" ("col1", "col2", ...)
+	// PostgreSQL grammar: CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] name ON ...
+	// The CONCURRENTLY keyword comes AFTER "INDEX", not before it.
 	sql := "CREATE"
-	if a.Concurrently {
-		sql += " CONCURRENTLY"
-	}
 	if a.Unique {
 		sql += " UNIQUE"
 	}
-	sql += " INDEX " + quoteIdent(a.IndexName) + " ON " + qualifiedIdent(a.Schema, a.Table) + " ("
+	sql += " INDEX"
+	if a.Concurrently {
+		sql += " CONCURRENTLY"
+	}
+	sql += " " + quoteIdent(a.IndexName) + " ON " + qualifiedIdent(a.Schema, a.Table) + " ("
 	quotedCols := make([]string, len(a.Columns))
 	for i, col := range a.Columns {
 		quotedCols[i] = quoteIdent(col)

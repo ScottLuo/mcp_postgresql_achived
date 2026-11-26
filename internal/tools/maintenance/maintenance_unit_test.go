@@ -255,7 +255,7 @@ func TestCreateIndex_Concurrently_UsesNonTransactionalPath(t *testing.T) {
 	if !nonTx.called {
 		t.Fatal("non-transactional runner was not called")
 	}
-	want := `CREATE CONCURRENTLY INDEX "idx_orders_cust" ON "public"."orders" ("customer_id", "created_at")`
+	want := `CREATE INDEX CONCURRENTLY "idx_orders_cust" ON "public"."orders" ("customer_id", "created_at")`
 	if nonTx.lastSQL != want {
 		t.Errorf("SQL = %q, want %q", nonTx.lastSQL, want)
 	}

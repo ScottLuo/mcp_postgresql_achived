@@ -32,7 +32,7 @@ SELECT
     write_lsn,
     flush_lsn,
     replay_lsn,
-    pg_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_lsn
+    pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_lsn
 FROM pg_stat_replication`
 
 // standbyStatusSQL returns the WAL receiver status on a standby. An empty
@@ -56,7 +56,7 @@ SELECT
     client_addr,
     state,
     replay_lsn,
-    pg_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_lsn
+    pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) AS lag_lsn
 FROM pg_stat_replication`
 
 // standbyLagSQL computes the in-flight lag on a standby: the gap between the
@@ -68,7 +68,7 @@ SELECT
     pg_last_wal_apply_lsn()   AS applied_lsn,
     CASE
         WHEN pg_last_wal_receive_lsn() IS NULL THEN NULL
-        ELSE pg_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())
+        ELSE pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())
     END AS lag_lsn
 FROM pg_stat_wal_receiver
 WHERE status = 'streaming'`
@@ -98,8 +98,9 @@ func (s *Service) isStandby(ctx context.Context, pool *pgxpool.Pool) (bool, erro
 
 // getReplicationStatus implements db_get_replication_status (spec §7.2). It
 // detects the node role (primary/standby) and reports the corresponding
-// streaming-replication view. When the target is not part of an active
-// replication setup it returns DB_FEATURE_UNAVAILABLE.
+// streaming-replication view. On a primary with no connected standbys, it
+// returns success with role="primary" and an empty standby list. On a
+// standby with no WAL receiver, it returns DB_FEATURE_UNAVAILABLE.
 func (s *Service) getReplicationStatus(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 	a, err := s.parseArgs(args)
 	if err != nil {
@@ -128,12 +129,24 @@ func (s *Service) getReplicationStatus(ctx context.Context, args json.RawMessage
 		return s.fail(ctx, toolGetReplicationStatus, a.Target, errCodeForErr(err), err.Error(), out.duration), nil
 	}
 
-	if len(out.rows) == 0 {
-		return s.fail(ctx, toolGetReplicationStatus, a.Target, mcp.ErrCodeFeatureUnavailable, featureUnavailableReplication, out.duration), nil
+	// On a primary with no connected standbys, return success with an
+	// empty standby list (spec: "not a standby, no crash").
+	if !standby && len(out.rows) == 0 {
+		data := map[string]any{
+			"role":     "primary",
+			"standbys": []any{},
+		}
+		return s.ok(ctx, toolGetReplicationStatus, a.Target, data, out.duration, false, 0), nil
+	}
+
+	// On a standby with no WAL receiver, the feature is unavailable.
+	if standby && len(out.rows) == 0 {
+		return s.fail(ctx, toolGetReplicationStatus, a.Target, mcp.ErrCodeFeatureUnavailable,
+			featureUnavailableReplication, out.duration), nil
 	}
 
 	data := map[string]any{
-		"role":    "standby",
+		"role": "standby",
 		"status": out.rows,
 	}
 	if !standby {
@@ -144,8 +157,9 @@ func (s *Service) getReplicationStatus(ctx context.Context, args json.RawMessage
 }
 
 // getReplicationLag implements db_get_replication_lag (spec §7.2). It reports
-// replication lag for the detected node role. When the target is not part of
-// an active replication setup it returns DB_FEATURE_UNAVAILABLE.
+// replication lag for the detected node role. On a single-node primary (no
+// connected standbys) it returns success with an empty lag list. On a standby
+// with no WAL receiver it returns DB_FEATURE_UNAVAILABLE.
 func (s *Service) getReplicationLag(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 	a, err := s.parseArgs(args)
 	if err != nil {
@@ -174,7 +188,18 @@ func (s *Service) getReplicationLag(ctx context.Context, args json.RawMessage) (
 		return s.fail(ctx, toolGetReplicationLag, a.Target, errCodeForErr(err), err.Error(), out.duration), nil
 	}
 
-	if len(out.rows) == 0 {
+	// On a single-node primary (no connected standbys) return success with
+	// an empty lag list: there is no lag to report.
+	if !standby && len(out.rows) == 0 {
+		data := map[string]any{
+			"role": "primary",
+			"lag":  []any{},
+		}
+		return s.ok(ctx, toolGetReplicationLag, a.Target, data, out.duration, false, 0), nil
+	}
+
+	// On a standby with no WAL receiver, the feature is unavailable.
+	if standby && len(out.rows) == 0 {
 		return s.fail(ctx, toolGetReplicationLag, a.Target, mcp.ErrCodeFeatureUnavailable, featureUnavailableReplication, out.duration), nil
 	}
 

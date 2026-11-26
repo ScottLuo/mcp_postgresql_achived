@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"postgres-dba-mcp/internal/mcp"
 )
@@ -29,8 +30,8 @@ const extPGStatStatements = "pg_stat_statements"
 // pg_stat_statements extension.
 const slowQueriesSQL = `
 SELECT
-    COALESCE(round(total_exec_time / NULLIF(calls, 0), 3), 0) AS mean_time_ms,
-    round(total_exec_time, 3)                                 AS total_time_ms,
+    COALESCE(round(total_exec_time::numeric / NULLIF(calls, 0)::numeric, 3), 0) AS mean_time_ms,
+    round(total_exec_time::numeric, 3)                                          AS total_time_ms,
     calls,
     rows,
     left(query, 2000)                                         AS query,
@@ -43,6 +44,13 @@ LIMIT $1`
 // getSlowQueries implements db_get_slow_queries (spec §7.2). It is gated on
 // the pg_stat_statements extension; when absent it returns DB_FEATURE_UNAVAILABLE
 // rather than a raw database error.
+//
+// Note: even when the extension is created, pg_stat_statements requires the
+// library to be loaded via shared_preload_libraries at server startup. If the
+// library is not preloaded, querying the view returns SQLSTATE 55000
+// (object_not_in_prerequisite_state). We map this to DB_FEATURE_UNAVAILABLE
+// as well, since from the tool's perspective the feature is not actually
+// usable.
 func (s *Service) getSlowQueries(ctx context.Context, args json.RawMessage) (*mcp.ToolResult, error) {
 	a, err := s.parseArgs(args)
 	if err != nil {
@@ -61,10 +69,28 @@ func (s *Service) getSlowQueries(ctx context.Context, args json.RawMessage) (*mc
 
 	out, err := s.runQuery(ctx, pool, slowQueriesSQL, []any{a.Limit}, a.Limit)
 	if err != nil {
+		// pg_stat_statements not preloaded via shared_preload_libraries:
+		// the extension view exists but is not usable.
+		if isStatStatementsNotPreloadedErr(err) {
+			return s.fail(ctx, toolGetSlowQueries, a.Target, mcp.ErrCodeFeatureUnavailable,
+				"pg_stat_statements extension is installed but not loaded via shared_preload_libraries; slow-query statistics are unavailable", out.duration), nil
+		}
 		return s.fail(ctx, toolGetSlowQueries, a.Target, errCodeForErr(err), err.Error(), out.duration), nil
 	}
 
 	return s.ok(ctx, toolGetSlowQueries, a.Target, out.rows, out.duration, out.execResult.Truncated, out.execResult.RowsReturned), nil
+}
+
+// isStatStatementsNotPreloadedErr detects the specific error that occurs when
+// pg_stat_statements extension is created but the library was not loaded via
+// shared_preload_libraries. The error has SQLSTATE 55000 and a message
+// containing "shared_preload_libraries".
+func isStatStatementsNotPreloadedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "shared_preload_libraries")
 }
 
 // schemaGetSlowQueries is the JSON Schema for db_get_slow_queries.

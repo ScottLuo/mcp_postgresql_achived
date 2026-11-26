@@ -154,14 +154,28 @@ func qualifiedIdent(schema, name string) string {
 	return quoteIdent(schema) + "." + quoteIdent(name)
 }
 
-// validateIdentifier checks that a SQL identifier does not contain characters
-// that would break quoted-identifier syntax.
+// validateIdentifier checks that a SQL identifier is a safe, unambiguous
+// identifier. Only alphanumeric characters, underscores, and dollar signs are
+// permitted (whitelist). This rejects spaces, semicolons, newlines, and other
+// characters that could confuse the parser or enable injection. PostgreSQL
+// identifiers are always quoted when embedded in generated SQL, but the
+// whitelist keeps the accepted name set conservative and human-readable.
 func validateIdentifier(field, value string) error {
-	if strings.ContainsAny(value, ";\n\r\x00") {
-		return fmt.Errorf("%w: %q contains invalid characters for a SQL identifier", errInvalidArgs, field)
+	if value == "" {
+		return fmt.Errorf("%w: %q must not be empty", errInvalidArgs, field)
 	}
 	if len(value) > 63 {
 		return fmt.Errorf("%w: %q exceeds maximum identifier length (63)", errInvalidArgs, field)
+	}
+	for _, c := range value {
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '_' || c == '$':
+		default:
+			return fmt.Errorf("%w: %q contains invalid characters for a SQL identifier (allowed: A-Z, a-z, 0-9, '_', '$')", errInvalidArgs, field)
+		}
 	}
 	return nil
 }

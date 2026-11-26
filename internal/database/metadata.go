@@ -240,8 +240,38 @@ type ColumnInfo struct {
 	IsPrimaryKey bool   `json:"primary_key"`
 }
 
+// tableExists reports whether a user-defined table or view exists in the
+// given schema. Used to surface a clear "table not found" error instead of
+// returning an empty column list for a nonexistent table (DIS-I11).
+func tableExists(ctx context.Context, pool *pgxpool.Pool, schema, table string) (bool, error) {
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_class c
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = $1
+			  AND c.relname = $2
+			  AND c.relkind IN ('r', 'v', 'm', 'p')
+		)
+	`, schema, table).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("metadata: check table existence for %s.%s: %w", schema, table, err)
+	}
+	return exists, nil
+}
+
 // DescribeTable returns column definitions and constraints for the specified table.
 func DescribeTable(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]ColumnInfo, error) {
+	// Verify the table exists so a missing table surfaces as an error rather
+	// than an empty result set.
+	exists, err := tableExists(ctx, pool, schema, table)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("metadata: table %s.%s not found", schema, table)
+	}
+
 	// Query column info using pg_catalog with identifier-safe names.
 	// We use $1/$2 parameterization for the table name via a subquery approach,
 	// but since pg_class.relname is a text column, we can parameterize it.
@@ -342,7 +372,7 @@ func ListIndexes(ctx context.Context, pool *pgxpool.Pool, schema, table string) 
 	query := `
 		SELECT
 			idx.relname,
-			pg_get_indexdef(i.indexoid),
+			pg_get_indexdef(i.indexrelid),
 			i.indisunique,
 			i.indisprimary,
 			i.indisvalid,
@@ -351,7 +381,7 @@ func ListIndexes(ctx context.Context, pool *pgxpool.Pool, schema, table string) 
 			COALESCE(s.idx_tup_fetch, 0) AS idx_tup_fetch,
 			pg_size_pretty(pg_relation_size(idx.oid)) AS size
 		FROM pg_index i
-		JOIN pg_class idx ON idx.oid = i.indexoid
+		JOIN pg_class idx ON idx.oid = i.indexrelid
 		JOIN pg_class tbl ON tbl.oid = i.indrelid
 		JOIN pg_namespace n ON n.oid = tbl.relnamespace
 		LEFT JOIN pg_stat_user_indexes s
@@ -433,135 +463,5 @@ func ListConstraints(ctx context.Context, pool *pgxpool.Pool, schema, table stri
 	return result, nil
 }
 
-// ---------------------------------------------------------------------------
-// GetTableSize
-// ---------------------------------------------------------------------------
-
-// TableSizeInfo represents the disk usage of a table and its indexes.
-type TableSizeInfo struct {
-	Schema      string `json:"schema"`
-	Table       string `json:"table"`
-	TotalSize   string `json:"total_size"`
-	TableSize   string `json:"table_size"`
-	IndexSize   string `json:"index_size"`
-	ToastSize   string `json:"toast_size"`
-}
-
-// GetTableSize returns the disk size breakdown for a table.
-func GetTableSize(ctx context.Context, pool *pgxpool.Pool, schema, table string) (*TableSizeInfo, error) {
-	var result TableSizeInfo
-	result.Schema = schema
-	result.Table = table
-
-	// Build an identifier-safe regclass expression using qualifiedIdentifier.
-	qualified := qualifiedIdentifier(schema, table)
-	query := fmt.Sprintf(`
-		SELECT
-			pg_size_pretty(pg_total_relation_size(%s::regclass)),
-			pg_size_pretty(pg_relation_size(%s::regclass)),
-			pg_size_pretty(pg_indexes_size(%s::regclass)),
-			pg_size_pretty(
-				pg_total_relation_size(%s::regclass)
-				- pg_relation_size(%s::regclass)
-				- pg_indexes_size(%s::regclass)
-			)
-	`, qualified, qualified, qualified, qualified, qualified, qualified)
-
-	err := pool.QueryRow(ctx, query).Scan(
-		&result.TotalSize, &result.TableSize, &result.IndexSize, &result.ToastSize,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("metadata: get table size for %s.%s: %w", schema, table, err)
-	}
-	return &result, nil
-}
-
-// ---------------------------------------------------------------------------
-// GetColumnStats
-// ---------------------------------------------------------------------------
-
-// ColumnStats represents basic statistics for a column.
-type ColumnStats struct {
-	Column         string  `json:"column"`
-	NumNull        int64   `json:"num_null"`
-	NumDistinct    int64   `json:"num_distinct"`
-	MostCommonVal  string  `json:"most_common_value,omitempty"`
-	MostCommonFreq float64 `json:"most_common_freq,omitempty"`
-}
-
-// GetColumnStats returns column statistics from pg_statistic.
-// Returns ErrFeatureUnavailable if the pg_statistic view has no rows
-// (e.g., ANALYZE has never been run on the table).
-func GetColumnStats(ctx context.Context, pool *pgxpool.Pool, schema, table string) ([]ColumnStats, error) {
-	// Check if statistics exist for this table.
-	var count int
-	err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM pg_statistic s
-		JOIN pg_class c ON c.oid = s.starelid
-		JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname = $1 AND c.relname = $2
-	`, schema, table).Scan(&count)
-	if err != nil {
-		return nil, fmt.Errorf("metadata: check stats for %s.%s: %w", schema, table, err)
-	}
-	if count == 0 {
-		return nil, fmt.Errorf("%w: no column statistics available for %s.%s (run ANALYZE)",
-			ErrFeatureUnavailable, schema, table)
-	}
-
-	simpleQuery := `
-		SELECT
-			a.attname,
-			COALESCE(s.stadistinct, 0)::bigint AS num_distinct,
-			CASE
-				WHEN s.staMostCommonvals IS NOT NULL
-				THEN s.staMostCommonvals::text
-				ELSE ''
-			END AS mcv_text,
-			CASE
-				WHEN s.staMostCommonfreqs IS NOT NULL AND array_length(s.staMostCommonfreqs, 1) > 0
-				THEN s.staMostCommonfreqs[1]
-				ELSE 0
-			END AS mcf
-		FROM pg_statistic s
-		JOIN pg_class c ON c.oid = s.starelid
-		JOIN pg_namespace n ON n.oid = c.relnamespace
-		JOIN pg_attribute a ON a.attrelid = s.starelid AND a.attnum = s.stanum
-		WHERE n.nspname = $1 AND c.relname = $2
-		ORDER BY s.stanum
-	`
-	rows, err := pool.Query(ctx, simpleQuery, schema, table)
-	if err != nil {
-		return nil, fmt.Errorf("metadata: get column stats for %s.%s: %w", schema, table, err)
-	}
-	defer rows.Close()
-
-	var result []ColumnStats
-	for rows.Next() {
-		var st ColumnStats
-		if err := rows.Scan(&st.Column, &st.NumDistinct, &st.MostCommonVal, &st.MostCommonFreq); err != nil {
-			return nil, fmt.Errorf("metadata: scan column stats: %w", err)
-		}
-		result = append(result, st)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("metadata: iterate column stats: %w", err)
-	}
-	return result, nil
-}
-
-// ---------------------------------------------------------------------------
-// CheckFeatureAvailable
-// ---------------------------------------------------------------------------
-
-// CheckFeatureAvailable checks whether a specific PostgreSQL extension
-// (e.g., pg_stat_statements) is installed.
-// Returns true if the extension is available, false otherwise.
-func CheckFeatureAvailable(ctx context.Context, pool *pgxpool.Pool, extensionName string) bool {
-	var exists bool
-	err := pool.QueryRow(ctx,
-		`SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)`,
-		extensionName,
-	).Scan(&exists)
-	return err == nil && exists
-}
+// Note: GetTableSize, GetColumnStats, and CheckFeatureAvailable have been
+// moved to metadata_sizing.go to keep this file under 600 lines.

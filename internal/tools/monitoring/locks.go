@@ -12,14 +12,18 @@ const toolGetLocks = "db_get_locks"
 
 // locksSQL joins pg_locks with pg_stat_activity and pg_class to report
 // per-lock detail including the blocking relationship.
+//
+// Note: pg_locks.waiting was removed in PostgreSQL 13; we report the
+// modern wait_event / wait_event_type columns instead (available since 9.6).
 const locksSQL = `
 SELECT
     l.pid,
-    l.usename,
+    a.usename,
     l.locktype,
     l.mode,
     l.granted,
-    l.waiting,
+    a.wait_event,
+    a.wait_event_type,
     c.relname          AS relation,
     a.application_name,
     a.query_start,
@@ -28,7 +32,7 @@ FROM pg_locks l
 LEFT JOIN pg_stat_activity a ON a.pid = l.pid
 LEFT JOIN pg_class c ON c.oid = l.relation
 WHERE l.pid <> pg_backend_pid()
-ORDER BY l.granted DESC, l.waiting DESC, l.pid`
+ORDER BY l.granted DESC, l.pid`
 
 // getLocks implements the db_get_locks tool (spec §7.2). It returns current
 // lock information joined with the owning session.

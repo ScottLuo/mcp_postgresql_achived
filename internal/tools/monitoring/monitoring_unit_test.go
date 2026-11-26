@@ -248,9 +248,9 @@ func TestGetSlowQueries_FeatureAvailable(t *testing.T) {
 	}
 }
 
-func TestReplicationStatus_NotReplication(t *testing.T) {
+func TestReplicationStatus_PrimaryNoStandby(t *testing.T) {
 	// Primary with no connected standbys: role query returns in_recovery=false,
-	// status query returns no rows -> feature unavailable.
+	// status query returns no rows -> success with role=primary and empty standbys.
 	svc, _ := newTestService(t, nil, true)
 	svc.runner = &sequentialRunner{results: []sequenceStep{
 		{res: &database.ExecResult{Columns: []string{"in_recovery"}, Rows: [][]any{{false}}, RowsReturned: 1}},
@@ -260,11 +260,15 @@ func TestReplicationStatus_NotReplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Success {
-		t.Fatalf("expected failure (feature unavailable)")
+	if !result.Success {
+		t.Fatalf("expected success for primary with no standbys, got %+v", result.Error)
 	}
-	if result.Error.Code != mcp.ErrCodeFeatureUnavailable {
-		t.Errorf("code = %q, want %q", result.Error.Code, mcp.ErrCodeFeatureUnavailable)
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", result.Data)
+	}
+	if data["role"] != "primary" {
+		t.Errorf("role = %v, want primary", data["role"])
 	}
 }
 
@@ -294,7 +298,7 @@ func TestReplicationStatus_PrimaryWithStandby(t *testing.T) {
 	}
 }
 
-func TestReplicationLag_NotReplication(t *testing.T) {
+func TestReplicationLag_PrimaryNoStandby(t *testing.T) {
 	svc, _ := newTestService(t, nil, true)
 	svc.runner = &sequentialRunner{results: []sequenceStep{
 		{res: &database.ExecResult{Columns: []string{"in_recovery"}, Rows: [][]any{{false}}, RowsReturned: 1}},
@@ -304,11 +308,15 @@ func TestReplicationLag_NotReplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Success {
-		t.Fatalf("expected failure (feature unavailable)")
+	if !result.Success {
+		t.Fatalf("expected success for primary with no standbys, got %+v", result.Error)
 	}
-	if result.Error.Code != mcp.ErrCodeFeatureUnavailable {
-		t.Errorf("code = %q, want %q", result.Error.Code, mcp.ErrCodeFeatureUnavailable)
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got %T", result.Data)
+	}
+	if data["role"] != "primary" {
+		t.Errorf("role = %v, want primary", data["role"])
 	}
 }
 
