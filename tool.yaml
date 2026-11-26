@@ -1,0 +1,36 @@
+# PostgreSQL DBA MCP Gateway - MCP Runtime Contract
+#
+# Schema per PROJECT_CONSTRAINTS §5.
+# Sensitive values (DSNs, credentials) are declared as "" and resolved
+# from the process ENV at runtime.
+#
+# entrypoint points to the compiled binary (relative path, exec bit set
+# in the release package).
+
+language: go
+kind: compiled
+entrypoint: ./postgres-dba-mcp
+args: []
+
+env:
+  # ── Non-sensitive defaults ──────────────────────────────────────────────
+  MCP_TRANSPORT: "stdio"
+  MCP_LOG_LEVEL: "info"
+  MCP_AUDIT_ENABLED: "true"
+
+  # ── Sensitive / DB values (resolved from ENV at runtime) ────────────────
+  POSTGRES_TARGETS: ""
+  POSTGRES_DEVELOPMENT_DSN: ""
+  POSTGRES_STAGING_DSN: ""
+  POSTGRES_PRODUCTION_DSN: ""
+
+  # ── Pool & query limits ─────────────────────────────────────────────────
+  DB_POOL_MIN_CONNS: "2"
+  DB_POOL_MAX_CONNS: "10"
+  DB_QUERY_TIMEOUT: "10s"
+  DB_MAX_ROWS: "1000"
+  DB_MAX_RESULT_SIZE: "1048576"
+  DB_DEFAULT_TARGET: "development"
+  DB_DEFAULT_ACCESS: "read_only"
+
+timeout_seconds: 30
