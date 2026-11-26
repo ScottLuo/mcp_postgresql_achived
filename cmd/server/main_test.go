@@ -242,9 +242,11 @@ func TestGOMod_RequiredDependencies(t *testing.T) {
 		}
 	}
 
-	// Verify no gopkg.in imports
-	if strings.Contains(content, "gopkg.in") {
-		t.Error("go.mod contains gopkg.in dependency (should not be used)")
+	// Verify no legacy gopkg.in imports; gopkg.in/yaml.v3 (the canonical Go YAML
+	// parser, used by internal/security/policy.go) is the one allowed exception.
+	contentWithoutYaml := strings.ReplaceAll(content, "gopkg.in/yaml.v3", "")
+	if strings.Contains(contentWithoutYaml, "gopkg.in") {
+		t.Error("go.mod contains legacy gopkg.in dependency (should not be used)")
 	}
 }
 

@@ -8,6 +8,7 @@
 package security
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -334,4 +335,46 @@ func nodeTypeName(node interface{}) string {
 		return "nil"
 	}
 	return fmt.Sprintf("%T", node)
+}
+
+// Package-level validation entry points.
+//
+// The query-analysis tool handlers (internal/tools/query) call ValidateReadOnly
+// and classify the returned error with the sentinel errors below. The length
+// limit used here mirrors the configuration default (MaxSQLLength) so the two
+// enforcement points stay consistent (data-same-source).
+const defaultMaxSQLLength = 65536
+
+// Sentinel errors returned by ValidateReadOnly. Tool handlers map these to the
+// standard error-code set via errors.Is: parse / multi-statement failures are
+// "invalid SQL"; everything else (non-SELECT, data-modifying CTE, ...) is
+// "not allowed".
+var (
+	// ErrInvalidSQL indicates the SQL could not be parsed or is structurally
+	// invalid (e.g. multiple statements, empty input, over the length limit).
+	ErrInvalidSQL = errors.New("SQL is invalid")
+	// ErrMultiStatement indicates the input contained more than one statement.
+	ErrMultiStatement = errors.New("multiple statements not allowed")
+)
+
+// ValidateReadOnly reports whether sql is a single, read-only SELECT statement,
+// returning a sentinel-wrapped error otherwise. It enforces: at most one
+// statement, top-level SELECT, read-only CTEs, and no dangerous functions.
+//
+// Structural/parse failures are wrapped with ErrInvalidSQL (multi-statement
+// input with ErrMultiStatement); semantic rejections (non-SELECT, data-modifying
+// CTE, dangerous function) are returned as-is so callers map them to the
+// "not allowed" standard code.
+func ValidateReadOnly(sql string) error {
+	_, err := NewSQLValidator(defaultMaxSQLLength).ValidateReadOnly(sql)
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), ErrCodeSQLInvalid) {
+		if strings.Contains(err.Error(), "multiple statements") {
+			return fmt.Errorf("%w: %s", ErrMultiStatement, err.Error())
+		}
+		return fmt.Errorf("%w: %s", ErrInvalidSQL, err.Error())
+	}
+	return err
 }
