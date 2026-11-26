@@ -9,6 +9,7 @@ require (
 	github.com/pganalyze/pg_query_go/v5 v5.1.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.31.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
