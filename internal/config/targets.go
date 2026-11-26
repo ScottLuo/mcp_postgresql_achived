@@ -2,77 +2,103 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strings"
 )
 
-// Target represents a configured PostgreSQL connection target.
+// Target represents a preconfigured PostgreSQL connection target.
 type Target struct {
-	Name          string     `json:"name"`
-	Enabled       bool       `json:"enabled"`
-	AccessMode    AccessMode `json:"access_mode"`
-	ConnectionEnv string     `json:"connection_env"`
+	Name          string     // Alias (e.g., "development")
+	Enabled       bool       // Whether the target is enabled
+	AccessMode    AccessMode // Per-target access mode
+	ConnectionEnv string     // Name of the ENV var holding the DSN
+	DSN           string     // Resolved DSN value (sensitive; use MaskDSN in logs)
 }
 
-// DSN returns the DSN resolved from the environment variable referenced by
-// ConnectionEnv. Returns an error if the variable is unset or empty.
-func (t *Target) DSN() (string, error) {
-	if t.ConnectionEnv == "" {
-		return "", fmt.Errorf("config: target %q has no connection_env set", t.Name)
-	}
-	dsn, ok := os.LookupEnv(t.ConnectionEnv)
-	if !ok || dsn == "" {
-		return "", fmt.Errorf("config: environment variable %q for target %q is not set", t.ConnectionEnv, t.Name)
-	}
-	return dsn, nil
+// MaskedDSN returns a masked version of the DSN safe for logging.
+func (t Target) MaskedDSN() string {
+	return MaskDSN(t.DSN)
 }
 
-// LoadTargets reads POSTGRES_TARGETS (comma-separated alias list) and
-// POSTGRES_<NAME>_DSN environment variables.
-// Returns a slice of Target definitions with validated DSN availability.
-func LoadTargets() ([]Target, error) {
-	targetsVar := os.Getenv("POSTGRES_TARGETS")
-	if targetsVar == "" {
-		return nil, fmt.Errorf("config: POSTGRES_TARGETS environment variable is required")
+// parseTargets reads POSTGRES_TARGETS (comma-separated alias list) and resolves
+// per-target POSTGRES_<NAME>_DSN environment variables.
+// Every listed target must have a corresponding non-empty DSN variable.
+func parseTargets(envVars map[string]string) ([]Target, error) {
+	raw, ok := envVars["POSTGRES_TARGETS"]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("required environment variable POSTGRES_TARGETS is unset or empty")
 	}
 
-	names := strings.Split(targetsVar, ",")
-	targets := make([]Target, 0, len(names))
+	aliases := strings.Split(raw, ",")
+	if len(aliases) == 0 {
+		return nil, fmt.Errorf("POSTGRES_TARGETS is empty")
+	}
 
-	for _, raw := range names {
-		name := strings.TrimSpace(raw)
-		if name == "" {
-			continue
+	targets := make([]Target, 0, len(aliases))
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			return nil, fmt.Errorf("POSTGRES_TARGETS contains an empty alias (check for trailing/leading commas)")
 		}
-		envVar := "POSTGRES_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_DSN"
-		t := Target{
-			Name:          name,
+
+		// Validate alias name: alphanumeric + underscore only
+		if err := validateTargetName(alias); err != nil {
+			return nil, fmt.Errorf("POSTGRES_TARGETS: %w", err)
+		}
+
+		// Build the DSN env var name: POSTGRES_<UPPER_ALIAS>_DSN
+		envName := "POSTGRES_" + strings.ToUpper(alias) + "_DSN"
+		dsn, ok := envVars[envName]
+		if !ok || strings.TrimSpace(dsn) == "" {
+			return nil, fmt.Errorf("environment variable %q is unset or empty (required for target %q)", envName, alias)
+		}
+
+		targets = append(targets, Target{
+			Name:          alias,
 			Enabled:       true,
-			AccessMode:    AccessReadOnly,
-			ConnectionEnv: envVar,
-		}
-
-		// Verify DSN is available
-		if _, err := t.DSN(); err != nil {
-			return nil, fmt.Errorf("config: target %q: %w", name, err)
-		}
-
-		// Allow per-target access mode override via env: POSTGRES_<NAME>_ACCESS
-		accessVar := "POSTGRES_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_ACCESS"
-		if am := os.Getenv(accessVar); am != "" {
-			switch AccessMode(am) {
-			case AccessReadOnly, AccessRestrictedWrite, AccessReadWrite:
-				t.AccessMode = AccessMode(am)
-			default:
-				return nil, fmt.Errorf("config: target %q: invalid access mode %q (must be read_only, restricted_write, or read_write)", name, am)
-			}
-		}
-
-		targets = append(targets, t)
-	}
-
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("config: POSTGRES_TARGETS contains no valid target names")
+			AccessMode:    AccessReadOnly, // default; can be overridden by Load
+			ConnectionEnv: envName,
+			DSN:           dsn,
+		})
 	}
 	return targets, nil
+}
+
+// validateTargetName ensures the alias contains only ASCII alphanumeric and underscore characters.
+func validateTargetName(name string) error {
+	for _, ch := range name {
+		isLower := ch >= 'a' && ch <= 'z'
+		isUpper := ch >= 'A' && ch <= 'Z'
+		isDigit := ch >= '0' && ch <= '9'
+		if !isLower && !isUpper && !isDigit && ch != '_' {
+			return fmt.Errorf("invalid target alias %q: must contain only alphanumeric characters and underscores", name)
+		}
+	}
+	return nil
+}
+
+// ResolveTarget looks up a target by alias (case-insensitive).
+// Returns a *Target and error if not found.
+func ResolveTarget(targets []Target, name string) (*Target, error) {
+	nameLower := strings.ToLower(name)
+	for i := range targets {
+		if strings.ToLower(targets[i].Name) == nameLower {
+			return &targets[i], nil
+		}
+	}
+	return nil, fmt.Errorf("target %q not found: valid targets are [%s]", name, joinTargetNames(targets))
+}
+
+// joinTargetNames returns a comma-separated list of target names for error messages.
+func joinTargetNames(targets []Target) string {
+	names := make([]string, len(targets))
+	for i, t := range targets {
+		names[i] = t.Name
+	}
+	return strings.Join(names, ", ")
+}
+
+// MaskDSN masks the password portion of a PostgreSQL DSN.
+// It handles both postgres:// and postgresql:// URL schemes.
+func MaskDSN(dsn string) string {
+	return maskDSN(dsn)
 }

@@ -1,128 +1,189 @@
-// Package config provides runtime configuration loaded from environment variables.
-// It is the single source of truth for pool settings, query limits, and target definitions.
 package config
 
 import (
-	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
-// PoolConfig holds connection pool settings.
-type PoolConfig struct {
-	MinConns            int           `json:"min_conns"`
-	MaxConns            int           `json:"max_conns"`
-	MaxConnLifetime     time.Duration `json:"max_conn_lifetime"`
-	MaxIdleTime         time.Duration `json:"max_idle_time"`
-}
-
-// QueryConfig holds query execution limits.
-type QueryConfig struct {
-	Timeout        time.Duration `json:"timeout"`
-	MaxRows        int           `json:"max_rows"`
-	MaxResultSize  int           `json:"max_result_size"`
-	MaxSQLLength   int           `json:"max_sql_length"`
-}
-
-// Config is the top-level application configuration.
-type Config struct {
-	Transport      string       `json:"transport"`
-	Pool           PoolConfig   `json:"pool"`
-	Query          QueryConfig  `json:"query"`
-	LogLevel       string       `json:"log_level"`
-	AuditEnabled   bool         `json:"audit_enabled"`
-	DefaultTarget  string       `json:"default_target"`
-	DefaultAccess  AccessMode   `json:"default_access"`
-}
-
-// AccessMode defines the privilege level for a target.
+// AccessMode defines the level of database access allowed for a target.
 type AccessMode string
 
+// Known access mode values.
 const (
-	// AccessReadOnly allows only SELECT queries.
-	AccessReadOnly AccessMode = "read_only"
-	// AccessRestrictedWrite allows SELECT and limited writes.
-	AccessRestrictedWrite AccessMode = "restricted_write"
-	// AccessReadWrite allows full read/write access.
-	AccessReadWrite AccessMode = "read_write"
+	AccessReadOnly          AccessMode = "read_only"
+	AccessRestrictedWrite   AccessMode = "restricted_write"
+	AccessReadWrite         AccessMode = "read_write"
 )
 
-// Default values as specified in the design document.
-const (
-	DefaultPoolMinConns          = 2
-	DefaultPoolMaxConns          = 10
-	DefaultMaxConnLifetime       = 1 * time.Hour
-	DefaultMaxIdleTime           = 15 * time.Minute
-	DefaultQueryTimeout          = 10 * time.Second
-	DefaultMaxRows               = 1000
-	DefaultMaxResultSize         = 1048576 // 1 MB
-	DefaultMaxSQLLength          = 65536   // 64 KB
-	DefaultTransport             = "stdio"
-	DefaultLogLevel              = "info"
-	DefaultAuditEnabled          = true
-	DefaultTarget                = "development"
-	DefaultAccess                = AccessReadOnly
-)
-
-// Load reads configuration from environment variables and returns a validated Config.
-// Missing required variables produce a descriptive error naming the variable.
-func Load() (*Config, error) {
-	cfg := &Config{
-		Transport:     envGetString("MCP_TRANSPORT", DefaultTransport),
-		LogLevel:      envGetString("MCP_LOG_LEVEL", DefaultLogLevel),
-		AuditEnabled:  envGetBool("MCP_AUDIT_ENABLED", DefaultAuditEnabled),
-		DefaultTarget: envGetString("DB_DEFAULT_TARGET", DefaultTarget),
-		DefaultAccess: AccessMode(envGetString("DB_DEFAULT_ACCESS", string(DefaultAccess))),
-	}
-
-	// Pool settings
-	cfg.Pool = PoolConfig{
-		MinConns:          envGetInt("DB_POOL_MIN_CONNS", DefaultPoolMinConns),
-		MaxConns:          envGetInt("DB_POOL_MAX_CONNS", DefaultPoolMaxConns),
-		MaxConnLifetime:   envGetDuration("DB_POOL_MAX_LIFETIME", DefaultMaxConnLifetime),
-		MaxIdleTime:       envGetDuration("DB_POOL_MAX_IDLE", DefaultMaxIdleTime),
-	}
-
-	// Query limits
-	cfg.Query = QueryConfig{
-		Timeout:       envGetDuration("DB_QUERY_TIMEOUT", DefaultQueryTimeout),
-		MaxRows:       envGetInt("DB_MAX_ROWS", DefaultMaxRows),
-		MaxResultSize: envGetInt("DB_MAX_RESULT_SIZE", DefaultMaxResultSize),
-		MaxSQLLength:  envGetInt("DB_MAX_SQL_LENGTH", DefaultMaxSQLLength),
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
+// PoolConfig holds database connection pool settings.
+type PoolConfig struct {
+	MinConns                int           `json:"min_conns"`
+	MaxConns                int           `json:"max_conns"`
+	MaxConnectionLifetime   time.Duration `json:"max_connection_lifetime"`
+	MaxIdleTime             time.Duration `json:"max_idle_time"`
 }
 
-// Validate checks internal consistency of the configuration.
-func (c *Config) Validate() error {
-	if c.Pool.MinConns < 1 {
-		return errors.New("config: DB_POOL_MIN_CONNS must be >= 1")
+// QueryLimits holds query execution limit settings.
+type QueryLimits struct {
+	Timeout        time.Duration `json:"timeout"`
+	MaxRows        int           `json:"max_rows"`
+	MaxResultSize  int           `json:"max_result_size"`  // bytes
+	MaxSQLLength   int           `json:"max_sql_length"`   // bytes
+}
+
+// Config is the single source of truth for all runtime configuration.
+// Downstream modules (database, security, mcp) read values only from this
+// struct and never re-parse ENV variables (data-same-source principle).
+type Config struct {
+	Transport         string      `json:"transport"`
+	LogLevel          string      `json:"log_level"`
+	AuditEnabled      bool        `json:"audit_enabled"`
+	DefaultTarget     string      `json:"default_target"`
+	DefaultAccessMode AccessMode  `json:"default_access_mode"`
+	Pool              PoolConfig  `json:"pool"`
+	QueryLimits       QueryLimits `json:"query_limits"`
+	Targets           []Target    `json:"targets"`
+}
+
+// defaultPoolConfig returns the default pool configuration.
+func defaultPoolConfig() PoolConfig {
+	return PoolConfig{
+		MinConns:                2,
+		MaxConns:                10,
+		MaxConnectionLifetime:   time.Hour,
+		MaxIdleTime:             15 * time.Minute,
 	}
-	if c.Pool.MaxConns < c.Pool.MinConns {
-		return fmt.Errorf("config: DB_POOL_MAX_CONNS (%d) must be >= DB_POOL_MIN_CONNS (%d)",
-			c.Pool.MaxConns, c.Pool.MinConns)
+}
+
+// defaultQueryLimits returns the default query limit configuration.
+func defaultQueryLimits() QueryLimits {
+	return QueryLimits{
+		Timeout:       10 * time.Second,
+		MaxRows:       1000,
+		MaxResultSize: 1048576, // 1 MB
+		MaxSQLLength:  65536,   // 64 KB
 	}
-	if c.Query.Timeout <= 0 {
-		return errors.New("config: DB_QUERY_TIMEOUT must be > 0")
+}
+
+// Load reads all runtime configuration from environment variables and returns
+// a fully validated Config. It returns a descriptive error naming the
+// missing/invalid variable on failure.
+func Load() (*Config, error) {
+	// Collect all environment variables into a map for target parsing.
+	envVars := make(map[string]string)
+	for _, key := range []string{
+		"POSTGRES_TARGETS",
+		"MCP_TRANSPORT",
+		"MCP_LOG_LEVEL",
+		"MCP_AUDIT_ENABLED",
+		"DB_POOL_MIN_CONNS",
+		"DB_POOL_MAX_CONNS",
+		"DB_QUERY_TIMEOUT",
+		"DB_MAX_ROWS",
+		"DB_MAX_RESULT_SIZE",
+		"DB_DEFAULT_TARGET",
+		"DB_DEFAULT_ACCESS",
+	} {
+		if val, ok := os.LookupEnv(key); ok {
+			envVars[key] = val
+		}
 	}
-	if c.Query.MaxRows < 1 {
-		return errors.New("config: DB_MAX_ROWS must be >= 1")
+	// Add all POSTGRES_*_DSN variables (their names are dynamic, per target alias).
+	for _, pair := range os.Environ() {
+		name, val, found := strings.Cut(pair, "=")
+		if found && strings.HasPrefix(name, "POSTGRES_") && strings.HasSuffix(name, "_DSN") {
+			envVars[name] = val
+		}
 	}
-	if c.Query.MaxResultSize < 1 {
-		return errors.New("config: DB_MAX_RESULT_SIZE must be >= 1")
+
+	// --- Required: POSTGRES_TARGETS must be set ---
+	if _, err := getRequired("POSTGRES_TARGETS"); err != nil {
+		return nil, err
 	}
-	if c.Query.MaxSQLLength < 1 {
-		return errors.New("config: DB_MAX_SQL_LENGTH must be >= 1")
+
+	// --- Parse targets ---
+	targets, err := parseTargets(envVars)
+	if err != nil {
+		return nil, err
 	}
-	switch c.DefaultAccess {
-	case AccessReadOnly, AccessRestrictedWrite, AccessReadWrite:
-	default:
-		return fmt.Errorf("config: DB_DEFAULT_ACCESS must be one of %q, %q, %q; got %q",
-			AccessReadOnly, AccessRestrictedWrite, AccessReadWrite, c.DefaultAccess)
+
+	// --- Transport ---
+	transport := getOptional("MCP_TRANSPORT", "stdio")
+	if err := validateTransport(transport); err != nil {
+		return nil, err
 	}
-	return nil
+
+	// --- Log level ---
+	logLevel := getOptional("MCP_LOG_LEVEL", "info")
+	if err := validateLogLevel(logLevel); err != nil {
+		return nil, err
+	}
+
+	// --- Audit enabled ---
+	auditEnabled, err := getOptionalBool("MCP_AUDIT_ENABLED", true)
+	if err != nil {
+		return nil, err
+	}
+
+	// --- Default target ---
+	defaultTarget := getOptional("DB_DEFAULT_TARGET", "development")
+
+	// --- Default access mode ---
+	defaultAccessStr := getOptional("DB_DEFAULT_ACCESS", "read_only")
+	defaultAccess, err := validateAccessMode(defaultAccessStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// --- Pool config ---
+	pool := defaultPoolConfig()
+	if minConns, err := getOptionalInt("DB_POOL_MIN_CONNS", 0); err != nil {
+		return nil, err
+	} else if minConns > 0 {
+		pool.MinConns = minConns
+	}
+	if maxConns, err := getOptionalInt("DB_POOL_MAX_CONNS", 0); err != nil {
+		return nil, err
+	} else if maxConns > 0 {
+		pool.MaxConns = maxConns
+	}
+	if pool.MaxConns < pool.MinConns {
+		return nil, fmt.Errorf("DB_POOL_MAX_CONNS (%d) must be >= DB_POOL_MIN_CONNS (%d)", pool.MaxConns, pool.MinConns)
+	}
+
+	// --- Query limits ---
+	limits := defaultQueryLimits()
+	if timeout, err := getOptionalDuration("DB_QUERY_TIMEOUT", 0); err != nil {
+		return nil, err
+	} else if timeout > 0 {
+		limits.Timeout = timeout
+	}
+	if maxRows, err := getOptionalInt("DB_MAX_ROWS", 0); err != nil {
+		return nil, err
+	} else if maxRows > 0 {
+		limits.MaxRows = maxRows
+	}
+	if maxResultSize, err := getOptionalInt("DB_MAX_RESULT_SIZE", 0); err != nil {
+		return nil, err
+	} else if maxResultSize > 0 {
+		limits.MaxResultSize = maxResultSize
+	}
+
+	// --- Cross-validation: default target must exist in target list ---
+	if _, err := ResolveTarget(targets, defaultTarget); err != nil {
+		return nil, fmt.Errorf("DB_DEFAULT_TARGET %q: %w", defaultTarget, err)
+	}
+
+	return &Config{
+		Transport:         transport,
+		LogLevel:          logLevel,
+		AuditEnabled:      auditEnabled,
+		DefaultTarget:     defaultTarget,
+		DefaultAccessMode: defaultAccess,
+		Pool:              pool,
+		QueryLimits:       limits,
+		Targets:           targets,
+	}, nil
 }

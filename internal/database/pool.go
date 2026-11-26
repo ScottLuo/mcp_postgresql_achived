@@ -37,7 +37,7 @@ func newPool(ctx context.Context, cfg *config.Config, dsn string, accessMode con
 	// Apply pool settings from config (data-same-source).
 	poolCfg.MinConns = int32(cfg.Pool.MinConns)
 	poolCfg.MaxConns = int32(cfg.Pool.MaxConns)
-	poolCfg.MaxConnLifetime = cfg.Pool.MaxConnLifetime
+	poolCfg.MaxConnLifetime = cfg.Pool.MaxConnectionLifetime
 	poolCfg.MaxConnIdleTime = cfg.Pool.MaxIdleTime
 
 	// Validate pool settings.

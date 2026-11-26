@@ -100,9 +100,9 @@ func NewManager(ctx context.Context, cfg *config.Config, targets []config.Target
 			continue
 		}
 
-		dsn, err := t.DSN()
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("%s: %v", t.Name, err))
+		dsn := t.DSN
+		if dsn == "" {
+			failures = append(failures, fmt.Sprintf("%s: empty DSN", t.Name))
 			continue
 		}
 
