@@ -7,6 +7,8 @@
 BINARY     := postgres-dba-mcp
 BUILD_DIR  := build
 PKG        := $(BUILD_DIR)/$(BINARY).tar.gz
+VERSION    ?= 0.1.0
+LDFLAGS    := -X main.appVersion=$(VERSION)
 
 .PHONY: all build test test-integration lint package docker clean
 
@@ -15,9 +17,10 @@ all: build
 
 # build: cross-compile for linux/amd64.
 # CGO_ENABLED=1 is required by pg_query_go (cgo-based SQL parser).
+# Version is injected via ldflags; override with: make build VERSION=0.2.0
 build:
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY) ./cmd/server/
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/server/
 
 # test: run unit tests.
 test:

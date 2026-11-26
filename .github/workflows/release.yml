@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for git tag detection
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run unit tests
+        run: go test -tags=unit ./... --timeout 20s
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Get the latest git tag matching v* pattern (sorted by version, descending)
+          LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$LAST_TAG" ]; then
+            # No previous tag; start at v0.1.0
+            VERSION="0.1.0"
+          else
+            # Strip the leading 'v'
+            CURRENT="${LAST_TAG#v}"
+            # Extract the patch component (third element in semver)
+            PATCH=$(echo "$CURRENT" | awk -F. '{print $3}')
+            # Increment patch by 1
+            NEXT_PATCH=$((PATCH + 1))
+            # Reconstruct version with incremented patch
+            MAJOR=$(echo "$CURRENT" | awk -F. '{print $1}')
+            MINOR=$(echo "$CURRENT" | awk -F. '{print $2}')
+            VERSION="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${VERSION}"
+
+      - name: Build binary
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p build
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+            go build -ldflags "-X main.appVersion=${VERSION}" \
+            -o build/postgres-dba-mcp ./cmd/server/
+          chmod +x build/postgres-dba-mcp
+
+      - name: Create release package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p release
+          cp build/postgres-dba-mcp release/
+          cp tool.yaml release/
+          chmod +x release/postgres-dba-mcp
+          tar -czf "postgres-dba-mcp-v${VERSION}-linux-amd64.tar.gz" \
+            -C release postgres-dba-mcp tool.yaml
+          rm -rf release
+
+      - name: Create git tag and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "Release v${{ steps.version.outputs.version }}"
+          description: "PostgreSQL DBA MCP Gateway v${{ steps.version.outputs.version }}"
+          files: |
+            postgres-dba-mcp-v${{ steps.version.outputs.version }}-linux-amd64.tar.gz
