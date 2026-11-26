@@ -1,0 +1,79 @@
+# PostgreSQL DBA MCP Gateway - Docker Compose
+#
+# Provides a local integration test / development environment:
+#   - PostgreSQL 16 with restricted DBA roles
+#   - MCP gateway (built from the project Dockerfile)
+#
+# Usage:
+#   1. Build the Docker image first:  make docker
+#   2. Start the stack:               docker compose up -d
+#   3. Attach to the MCP gateway:     docker compose exec mcp-gateway cat
+#      (stdio mode reads MCP JSON-RPC from stdin)
+#
+# For integration tests, set POSTGRES_TARGETS and DSNs to point to the
+# postgres service below.
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mcp-postgres
+    environment:
+      POSTGRES_DB: devdb
+      POSTGRES_USER: dba_admin
+      POSTGRES_PASSWORD: admin_secret
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dba_admin -d devdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Init script to create restricted DBA roles on first boot.
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mcp-network
+
+  mcp-gateway:
+    image: postgres-dba-mcp
+    container_name: mcp-gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # ── MCP transport ────────────────────────────────────────────────
+      MCP_TRANSPORT: "stdio"
+      MCP_LOG_LEVEL: "debug"
+      MCP_AUDIT_ENABLED: "true"
+
+      # ── Database targets ─────────────────────────────────────────────
+      POSTGRES_TARGETS: "development"
+      POSTGRES_DEVELOPMENT_DSN: "postgres://dba_reader:admin_secret@postgres:5432/devdb?sslmode=disable"
+
+      # ── Pool & query limits ──────────────────────────────────────────
+      DB_POOL_MIN_CONNS: "2"
+      DB_POOL_MAX_CONNS: "10"
+      DB_QUERY_TIMEOUT: "10s"
+      DB_MAX_ROWS: "1000"
+      DB_MAX_RESULT_SIZE: "1048576"
+      DB_DEFAULT_TARGET: "development"
+      DB_DEFAULT_ACCESS: "read_only"
+
+    # In stdio mode, the MCP client provides stdin/stdout.
+    # For local testing, you can attach: docker compose exec mcp-gateway cat
+    # For HTTP mode, uncomment the port below.
+    # ports:
+    #   - "9090:9090"
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
+
+volumes:
+  pgdata:
