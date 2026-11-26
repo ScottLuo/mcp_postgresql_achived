@@ -15,19 +15,25 @@ policies:
       - db_analyze_table
       - db_vacuum_table
       - db_create_index
+      - db_get_config
+      - db_get_config_list
     require_approval:
       - db_drop_index
       - db_reindex_table
+      - db_reload_config
   staging:
     default_access: read_only
     allowed:
       - db_query_readonly
       - db_explain_query
       - db_analyze_table
+      - db_get_config
+      - db_get_config_list
     require_approval:
       - db_create_index
       - db_drop_index
       - db_vacuum_table
+      - db_reload_config
   production:
     default_access: read_only
     allowed:
@@ -35,8 +41,11 @@ policies:
       - db_explain_query
       - db_get_activity
       - db_get_locks
+      - db_get_config
+      - db_get_config_list
     require_approval:
       - db_analyze_table
       - db_vacuum_table
       - db_create_index
       - db_drop_index
+      - db_reload_config
