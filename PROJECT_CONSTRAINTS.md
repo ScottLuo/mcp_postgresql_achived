@@ -60,8 +60,9 @@ timeout_seconds: 30
 ## 6. CI/CD Packaging Logic
 构建命令必须针对 `linux/amd64`：
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
 ```
+（`CGO_ENABLED=1` is required by `pg_query_go`, the cgo-based SQL parser.）
 生成的发布包（tar.gz）必须包含：
 1. 编译好的二进制文件 (`postgres-dba-mcp`)
 2. `tool.yaml` 文件

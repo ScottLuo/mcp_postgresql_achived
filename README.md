@@ -202,9 +202,9 @@ Changing operation parameters after approval invalidates the approval.
 ### Build
 
 ```bash
-make build          # Build for linux/amd64 (CGO_ENABLED=0)
+make build          # Build for linux/amd64 (CGO_ENABLED=1, required by pg_query_go)
 # Or manually:
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
 ```
 
 ### Run
@@ -242,7 +242,7 @@ On push to `main`, the CI pipeline:
 
 1. Cross-compiles for `linux/amd64`:
    ```bash
-   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
+   CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o build/postgres-dba-mcp ./cmd/server/
    ```
 2. Creates a `tar.gz` containing:
    - `postgres-dba-mcp` (executable binary, `chmod +x`)
