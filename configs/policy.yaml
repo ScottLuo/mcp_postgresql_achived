@@ -1,0 +1,51 @@
+# Per-target access policies (spec §8.2).
+#
+# Each target defines:
+#   default_access: the minimum access mode required (read_only | restricted_write | read_write)
+#   allowed: tools that can be invoked without approval
+#   require_approval: tools that require an explicit approval record before execution
+#
+# Default-deny principle: tools not in either `allowed` or `require_approval` are denied.
+policies:
+  development:
+    default_access: read_only
+    allowed:
+      - db_query_readonly
+      - db_explain_query
+      - db_analyze_table
+      - db_vacuum_table
+      - db_create_index
+      - db_get_config
+      - db_get_config_list
+    require_approval:
+      - db_drop_index
+      - db_reindex_table
+      - db_reload_config
+  staging:
+    default_access: read_only
+    allowed:
+      - db_query_readonly
+      - db_explain_query
+      - db_analyze_table
+      - db_get_config
+      - db_get_config_list
+    require_approval:
+      - db_create_index
+      - db_drop_index
+      - db_vacuum_table
+      - db_reload_config
+  production:
+    default_access: read_only
+    allowed:
+      - db_query_readonly
+      - db_explain_query
+      - db_get_activity
+      - db_get_locks
+      - db_get_config
+      - db_get_config_list
+    require_approval:
+      - db_analyze_table
+      - db_vacuum_table
+      - db_create_index
+      - db_drop_index
+      - db_reload_config
