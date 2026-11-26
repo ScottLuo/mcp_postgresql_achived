@@ -31,7 +31,7 @@ func (h *costEstimateHandler) Execute(ctx context.Context, args json.RawMessage)
 
 	var in explainArgs
 	if err := json.Unmarshal(args, &in); err != nil {
-		return d.errorResult(ctx, tool, "", mcp.ErrCodeSQLInvalid, "invalid arguments: "+security.SanitizeError(err), start), nil
+		return d.errorResult(ctx, tool, "", mcp.ErrCodeSQLInvalid, "invalid arguments: "+security.SanitizeError(err.Error()), start), nil
 	}
 
 	if in.SQL == "" {
@@ -48,7 +48,7 @@ func (h *costEstimateHandler) Execute(ctx context.Context, args json.RawMessage)
 	// The cost is estimated for a single, read-only SELECT only.
 	if err := security.ValidateReadOnly(in.SQL); err != nil {
 		return d.errorResult(ctx, tool, d.resolveTarget(in.Target), classifyValidationError(err),
-			"SQL not allowed for cost estimation: "+security.SanitizeError(err), start), nil
+			"SQL not allowed for cost estimation: "+security.SanitizeError(err.Error()), start), nil
 	}
 
 	target := d.resolveTarget(in.Target)
@@ -65,7 +65,7 @@ func (h *costEstimateHandler) Execute(ctx context.Context, args json.RawMessage)
 	res, err := exec.Execute(ctx, parseExplainSQL("FORMAT JSON", in.SQL), in.Params, 0)
 	if err != nil {
 		code, _ := classifyExecError(err)
-		return d.errorResult(ctx, tool, target, code, security.SanitizeError(err), start), nil
+		return d.errorResult(ctx, tool, target, code, security.SanitizeError(err.Error()), start), nil
 	}
 
 	plan := extractPlan(res)

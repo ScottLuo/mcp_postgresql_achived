@@ -167,7 +167,7 @@ func (d *Deps) getPoolErr(ctx context.Context, tool, target string, start time.T
 		if errors.As(err, &tnfe) {
 			code = mcp.ErrCodeTargetNotFound
 		}
-		return nil, d.errorResult(ctx, tool, target, code, security.SanitizeError(err), start)
+		return nil, d.errorResult(ctx, tool, target, code, security.SanitizeError(err.Error()), start)
 	}
 	return pool, nil
 }
@@ -343,7 +343,7 @@ func (h *queryReadonlyHandler) Execute(ctx context.Context, args json.RawMessage
 
 	var in queryReadonlyArgs
 	if err := json.Unmarshal(args, &in); err != nil {
-		return d.errorResult(ctx, tool, "", mcp.ErrCodeSQLInvalid, "invalid arguments: "+security.SanitizeError(err), start), nil
+		return d.errorResult(ctx, tool, "", mcp.ErrCodeSQLInvalid, "invalid arguments: "+security.SanitizeError(err.Error()), start), nil
 	}
 
 	if in.SQL == "" {
@@ -361,7 +361,7 @@ func (h *queryReadonlyHandler) Execute(ctx context.Context, args json.RawMessage
 	// AST validation: single, read-only, SELECT-only statement (spec §9.2).
 	if err := security.ValidateReadOnly(in.SQL); err != nil {
 		return d.errorResult(ctx, tool, d.resolveTarget(in.Target), classifyValidationError(err),
-			"SQL not allowed for read-only execution: "+security.SanitizeError(err), start), nil
+			"SQL not allowed for read-only execution: "+security.SanitizeError(err.Error()), start), nil
 	}
 
 	target := d.resolveTarget(in.Target)
@@ -379,17 +379,17 @@ func (h *queryReadonlyHandler) Execute(ctx context.Context, args json.RawMessage
 	res, err := exec.ExecuteReadOnly(ctx, in.SQL, in.Params, in.Limit)
 	if err != nil {
 		code, _ := classifyExecError(err)
-		return d.errorResult(ctx, tool, target, code, security.SanitizeError(err), start), nil
+		return d.errorResult(ctx, tool, target, code, security.SanitizeError(err.Error()), start), nil
 	}
 
 	d.recordSuccess(ctx, tool, target, start, res, res.RowsReturned, "")
 
 	data := map[string]any{
-		"columns":          res.Columns,
-		"rows":             res.Rows,
-		"rows_returned":    res.RowsReturned,
-		"truncated":        res.Truncated,
-		"duration_ms":      res.Duration.Milliseconds(),
+		"columns":       res.Columns,
+		"rows":          res.Rows,
+		"rows_returned": res.RowsReturned,
+		"truncated":     res.Truncated,
+		"duration_ms":   res.Duration.Milliseconds(),
 	}
 	return mcp.SuccessResult(data, &mcp.Metadata{
 		Target:       target,
